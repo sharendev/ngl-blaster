@@ -3,14 +3,11 @@ import threading
 import random
 import queue
 import itertools
+import time
+import uuid
+import urllib.parse
 from datetime import datetime
-
-# ── Try importing playwright; show error in UI if missing ──────────────────────
-try:
-    from playwright.sync_api import sync_playwright
-    PLAYWRIGHT_OK = True
-except ImportError:
-    PLAYWRIGHT_OK = False
+import requests
 
 # ── Theme ──────────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -45,76 +42,106 @@ MESSAGES = [
     "Rooting for you every single day 🎯",
 ]
 
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36",
+]
 
-# ── Worker ─────────────────────────────────────────────────────────────────────
-def worker(url, count, thread_id, log_q, stop_event, done_q):
-    if not PLAYWRIGHT_OK:
-        log_q.put(("error", "playwright not installed. Run: pip install playwright && python -m playwright install"))
-        done_q.put(thread_id)
-        return
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
+def extract_username(url_or_user: str) -> str:
+    cleaned = url_or_user.strip()
+    if not cleaned:
+        return ""
+    if not cleaned.startswith("http://") and not cleaned.startswith("https://"):
+        if "/" in cleaned:
+            cleaned = "https://" + cleaned
+        else:
+            return cleaned.lstrip("@")
+    parsed = urllib.parse.urlparse(cleaned)
+    path = parsed.path.strip("/")
+    parts = path.split("/")
+    return parts[-1].lstrip("@") if parts and parts[-1] else ""
 
-            def block_resources(route):
-                if route.request.resource_type in ("image", "media", "font"):
-                    route.abort()
-                else:
-                    route.continue_()
 
-            page = context.new_page()
-            page.route("**/*", block_resources)
+# ── Ultra-Lightweight HTTP Worker (Near 0% CPU) ─────────────────────────────────
+def worker(username, count, delay_ms, thread_id, log_q, stop_event, done_q):
+    session = requests.Session()
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Origin": "https://ngl.link",
+        "Referer": f"https://ngl.link/{username}",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "*/*",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    }
 
-            # count=-1 means unlimited — loop until stop_event is set
-            counter = itertools.count(1) if count == -1 else range(1, count + 1)
-            for i in counter:
-                if stop_event.is_set():
-                    log_q.put(("warn", f"[T{thread_id}] Stopped by user."))
+    counter = itertools.count(1) if count == -1 else range(1, count + 1)
+    for i in counter:
+        if stop_event.is_set():
+            log_q.put(("warn", f"[T{thread_id}] Stopped by user."))
+            break
+
+        label = f"{i}/∞" if count == -1 else f"{i}/{count}"
+        log_q.put(("info", f"[T{thread_id}] [{label}] Sending..."))
+
+        msg = random.choice(MESSAGES)
+        payload = {
+            "username": username,
+            "question": msg,
+            "deviceId": str(uuid.uuid4()),
+            "gameSlug": "",
+            "referrer": "",
+        }
+
+        sent = False
+        for attempt in range(3):
+            if stop_event.is_set():
+                break
+            try:
+                t0 = time.time()
+                resp = session.post(
+                    "https://ngl.link/api/submit",
+                    data=payload,
+                    headers=headers,
+                    timeout=12
+                )
+                duration_ms = (time.time() - t0) * 1000
+
+                if resp.status_code == 200:
+                    log_q.put(("success", f"[T{thread_id}] [{label}] ✓ Sent: \"{msg}\""))
+                    log_q.put(("progress", duration_ms))
+                    sent = True
                     break
+                elif resp.status_code == 429:
+                    log_q.put(("warn", f"[T{thread_id}] [{label}] Rate limit (429) hit, cooling down 2s..."))
+                    for _ in range(20):
+                        if stop_event.is_set():
+                            break
+                        time.sleep(0.1)
+                else:
+                    log_q.put(("error", f"[T{thread_id}] [{label}] ✗ HTTP {resp.status_code}: {resp.text[:80]}"))
+                    break
+            except requests.exceptions.RequestException as e:
+                if attempt < 2 and not stop_event.is_set():
+                    log_q.put(("warn", f"[T{thread_id}] [{label}] Retrying ({type(e).__name__})..."))
+                    time.sleep(0.5)
+                    continue
+                log_q.put(("error", f"[T{thread_id}] [{label}] ✗ Connection error: {e}"))
+                break
 
-                label = f"{i}/∞" if count == -1 else f"{i}/{count}"
-                log_q.put(("info", f"[T{thread_id}] [{label}] Sending..."))
-                sent = False
+        if not sent and not stop_event.is_set():
+            log_q.put(("progress_failed", None))
 
-                for attempt in range(3):  # retry up to 3x on transient errors
-                    try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                        page.wait_for_selector('textarea', timeout=8000)
-
-                        msg = random.choice(MESSAGES)
-                        page.fill('textarea', '')
-                        page.type('textarea', msg, delay=20)
-
-                        page.wait_for_selector('button.submit:visible', timeout=8000)
-                        page.click('button.submit')
-
-                        # Wait for post-submit redirect to fully settle before next goto
-                        # This prevents ERR_ABORTED on the next navigation
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=3000)
-                        except Exception:
-                            page.wait_for_timeout(900)  # fallback if networkidle times out
-
-                        log_q.put(("success", f"[T{thread_id}] [{label}] ✓ Sent: \"{msg}\""))
-                        log_q.put(("progress", None))
-                        sent = True
-                        break  # success — no retry needed
-
-                    except Exception as e:
-                        err = str(e)
-                        if "ERR_ABORTED" in err and attempt < 2:
-                            log_q.put(("warn", f"[T{thread_id}] [{label}] Retrying (aborted)..."))
-                            page.wait_for_timeout(700)
-                            continue
-                        log_q.put(("error", f"[T{thread_id}] [{label}] ✗ {err.splitlines()[0]}"))
-                        log_q.put(("progress", None))
-                        break
-
-            browser.close()
-    except Exception as e:
-        log_q.put(("error", f"[T{thread_id}] Browser error: {e}"))
+        # Respect user configured delay between requests
+        if delay_ms > 0 and not stop_event.is_set():
+            sleep_steps = max(1, int(delay_ms / 50))
+            for _ in range(sleep_steps):
+                if stop_event.is_set():
+                    break
+                time.sleep(delay_ms / (1000.0 * sleep_steps))
 
     done_q.put(thread_id)
 
@@ -161,7 +188,7 @@ class NGLApp(ctk.CTk):
         ).grid(row=0, column=1, pady=20)
 
         ctk.CTkLabel(
-            header, text="v2.0  •  anonymous messages",
+            header, text="v2.5  •  ultra-low CPU mode",
             font=("Segoe UI", 11), text_color=MUTED
         ).grid(row=0, column=2, padx=20, pady=20)
 
@@ -184,9 +211,9 @@ class NGLApp(ctk.CTk):
         self.url_entry.grid(row=0, column=1, sticky="ew", pady=10, padx=(0, 12))
 
         # Count / Threads / Delay sliders
-        self.count_slider_frame = self._labeled_slider(ctrl, "Messages", 1, 200, 10, row=1, col=0, attr="count_var")
-        self._labeled_slider(ctrl, "Threads",  1,  10,  1, row=1, col=1, attr="threads_var")
-        self._labeled_slider(ctrl, "Delay (ms)", 100, 2000, 400, row=1, col=2, attr="delay_var")
+        self.count_slider_frame = self._labeled_slider(ctrl, "Messages", 1, 500, 20, row=1, col=0, attr="count_var")
+        self._labeled_slider(ctrl, "Threads",  1,  30,  5, row=1, col=1, attr="threads_var")
+        self._labeled_slider(ctrl, "Delay (ms)", 0, 2000, 100, row=1, col=2, attr="delay_var")
 
         # Unlimited toggle
         unlimited_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -279,16 +306,13 @@ class NGLApp(ctk.CTk):
 
         self.status_dot = ctk.CTkLabel(status, text="●", text_color=MUTED, font=("Segoe UI", 12))
         self.status_dot.grid(row=0, column=0, padx=(14, 4), pady=6)
-        self.status_lbl = ctk.CTkLabel(status, text="Ready", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
+        self.status_lbl = ctk.CTkLabel(status, text="Ready (Direct HTTP mode • ~0% CPU)", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
         self.status_lbl.grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
             status, text="⚡ Powered by Ajith",
             font=("Segoe UI", 11, "bold"), text_color=ACCENT2
         ).grid(row=0, column=2, padx=(0, 16), sticky="e")
-
-        if not PLAYWRIGHT_OK:
-            self._log("error", "⚠ playwright not found. Run: pip install playwright && python -m playwright install")
 
     def _labeled_slider(self, parent, label, from_, to, default, row, col, attr):
         frame = ctk.CTkFrame(parent, fg_color=CARD2, corner_radius=10)
@@ -332,16 +356,17 @@ class NGLApp(ctk.CTk):
                     pass
 
     def _start(self):
-        url = self.url_entry.get().strip()
-        if not url:
-            self._log("error", "⚠ Please enter an NGL URL first.")
+        raw_url = self.url_entry.get().strip()
+        username = extract_username(raw_url)
+        if not username:
+            self._log("error", "⚠ Please enter an NGL URL or username first.")
             return
-        if not url.startswith("http"):
-            url = "https://" + url
 
         unlimited  = self.unlimited_var.get()
         total      = -1 if unlimited else self.count_var.get()
         threads_n  = self.threads_var.get()
+        delay_ms   = self.delay_var.get()
+
         self.total = total
         self.sent  = 0
         self.progress_bar.set(0)
@@ -351,21 +376,28 @@ class NGLApp(ctk.CTk):
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         label_count = "∞" if unlimited else str(total)
-        self._set_status("running", f"Sending {label_count} messages via {threads_n} thread(s)...")
-        self._log("info", f"━━ Starting  ▸  {url}  |  {label_count} msgs  |  {threads_n} thread(s) ━━")
+        self._set_status("running", f"Sending {label_count} messages to @{username} via {threads_n} thread(s)...")
+        self._log("info", f"━━ Starting  ▸  @{username}  |  {label_count} msgs  |  {threads_n} thread(s) ━━")
 
         self.active_threads = threads_n
         for t in range(threads_n):
+            if unlimited:
+                thread_count = -1
+            else:
+                per_thread = total // threads_n
+                remainder = total % threads_n
+                thread_count = per_thread + (1 if t < remainder else 0)
+
             threading.Thread(
                 target=worker,
-                args=(url, total, t + 1, self.log_q, self.stop_evt, self.done_q),
+                args=(username, thread_count, delay_ms, t + 1, self.log_q, self.stop_evt, self.done_q),
                 daemon=True
             ).start()
 
     def _stop(self):
         self.stop_evt.set()
         self._set_status("warn", "Stopping…")
-        self._log("warn", "■ Stop requested — waiting for threads to finish...")
+        self._log("warn", "■ Stop requested — waiting for active workers...")
 
     def _clear_log(self):
         self.log_box.configure(state="normal")
@@ -380,13 +412,14 @@ class NGLApp(ctk.CTk):
                 if kind == "progress":
                     self.sent += 1
                     if self.total == -1:
-                        # Unlimited: pulse bar back and forth, show sent count only
                         self.progress_bar.set((self.sent % 20) / 20)
                         self.prog_label.configure(text=f"{self.sent} / ∞")
                     else:
                         ratio = self.sent / self.total if self.total else 0
                         self.progress_bar.set(ratio)
                         self.prog_label.configure(text=f"{self.sent} / {self.total}")
+                elif kind == "progress_failed":
+                    pass
                 else:
                     self._log(kind, msg)
         except queue.Empty:
@@ -401,18 +434,18 @@ class NGLApp(ctk.CTk):
         except queue.Empty:
             pass
 
-        self.after(80, self._poll)
+        self.after(50, self._poll)
 
     def _on_all_done(self):
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
         if self.stop_evt.is_set():
-            self._set_status("warn", f"Stopped — {self.sent}/{self.total} sent")
-            self._log("warn", f"━━ Stopped  |  {self.sent}/{self.total} sent ━━")
+            self._set_status("warn", f"Stopped — {self.sent}/{self.total if self.total != -1 else '∞'} sent")
+            self._log("warn", f"━━ Stopped  |  {self.sent}/{self.total if self.total != -1 else '∞'} sent ━━")
         else:
-            self._set_status("success", f"Done — {self.sent}/{self.total} messages sent!")
-            self._log("success", f"━━ Finished  |  {self.sent}/{self.total} sent ✓ ━━")
-        self.progress_bar.set(self.sent / self.total if self.total else 1)
+            self._set_status("success", f"Done — {self.sent}/{self.total if self.total != -1 else '∞'} messages sent!")
+            self._log("success", f"━━ Finished  |  {self.sent}/{self.total if self.total != -1 else '∞'} sent ✓ ━━")
+        self.progress_bar.set(self.sent / self.total if (self.total and self.total != -1) else 1)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
     def _log(self, kind, msg):
