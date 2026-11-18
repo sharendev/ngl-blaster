@@ -24,6 +24,10 @@ CARD2    = "#1E1E35"
 TEXT     = "#E2E8F0"
 MUTED    = "#64748B"
 
+# Hardcoded optimal defaults (2 threads, 800ms delay) to prevent Cloudflare blocks
+DEFAULT_THREADS = 2
+DEFAULT_DELAY_MS = 800
+
 MESSAGES = [
     "You're absolutely amazing 🌟",
     "Keep being you, always!",
@@ -122,7 +126,6 @@ def worker(username, count, delay_ms, thread_id, log_q, stop_event, done_q):
             if stop_event.is_set():
                 break
 
-            # If inside retry loop, check cooldown again
             with cooldown_lock:
                 wait_remaining = cooldown_until - time.time()
             if wait_remaining > 0:
@@ -147,7 +150,6 @@ def worker(username, count, delay_ms, thread_id, log_q, stop_event, done_q):
                     sent = True
                     break
 
-                # Cloudflare rate limit masking as 404 or returning 429 / 503
                 is_rate_limit = (
                     resp.status_code in (429, 503) or
                     (resp.status_code == 404 and "Could not find user" in resp.text)
@@ -158,15 +160,13 @@ def worker(username, count, delay_ms, thread_id, log_q, stop_event, done_q):
                     with cooldown_lock:
                         cooldown_until = max(cooldown_until, time.time() + backoff)
                     log_q.put(("warn", f"[T{thread_id}] [{label}] Rate limit hit (HTTP {resp.status_code}). Backing off {backoff}s before retry..."))
-                    
-                    # Sleep through backoff
+
                     steps = int(backoff / 0.5)
                     for _ in range(steps):
                         if stop_event.is_set():
                             break
                         time.sleep(0.5)
 
-                    # Rotate session and headers
                     session = requests.Session()
                     headers["User-Agent"] = random.choice(USER_AGENTS)
                     payload["deviceId"] = str(uuid.uuid4())
@@ -186,7 +186,6 @@ def worker(username, count, delay_ms, thread_id, log_q, stop_event, done_q):
         if not sent and not stop_event.is_set():
             log_q.put(("progress_failed", None))
 
-        # Respect user configured delay between requests
         if delay_ms > 0 and not stop_event.is_set():
             sleep_steps = max(1, int(delay_ms / 50))
             for _ in range(sleep_steps):
@@ -246,11 +245,12 @@ class NGLApp(ctk.CTk):
         # ── Controls Card ───────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(self, fg_color=CARD, corner_radius=16)
         ctrl.grid(row=1, column=0, padx=20, pady=(16, 8), sticky="ew")
-        ctrl.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        ctrl.grid_columnconfigure(0, weight=3)
+        ctrl.grid_columnconfigure(1, weight=1)
 
         # URL
         url_frame = ctk.CTkFrame(ctrl, fg_color=CARD2, corner_radius=10)
-        url_frame.grid(row=0, column=0, columnspan=4, padx=16, pady=(16, 8), sticky="ew")
+        url_frame.grid(row=0, column=0, columnspan=2, padx=16, pady=(16, 8), sticky="ew")
         url_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(url_frame, text="🔗", font=("Segoe UI", 16), text_color=ACCENT2).grid(row=0, column=0, padx=(12, 6), pady=10)
@@ -261,10 +261,8 @@ class NGLApp(ctk.CTk):
         )
         self.url_entry.grid(row=0, column=1, sticky="ew", pady=10, padx=(0, 12))
 
-        # Count / Threads / Delay sliders
+        # Messages Slider (takes full width of left area)
         self.count_slider_frame = self._labeled_slider(ctrl, "Messages", 1, 1000, 100, row=1, col=0, attr="count_var")
-        self._labeled_slider(ctrl, "Threads",  1,  20,  2, row=1, col=1, attr="threads_var")
-        self._labeled_slider(ctrl, "Delay (ms)", 100, 3000, 800, row=1, col=2, attr="delay_var")
 
         # Unlimited toggle
         unlimited_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -280,9 +278,9 @@ class NGLApp(ctk.CTk):
         )
         self.unlimited_switch.pack(side="left")
 
-        # Buttons
+        # Buttons (START / STOP) on the right
         btn_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_frame.grid(row=1, column=3, padx=12, pady=12, sticky="nsew")
+        btn_frame.grid(row=1, column=1, padx=12, pady=12, sticky="nsew")
         btn_frame.grid_rowconfigure((0, 1), weight=1)
 
         self.start_btn = ctk.CTkButton(
@@ -306,7 +304,7 @@ class NGLApp(ctk.CTk):
 
         # Progress bar
         prog_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        prog_frame.grid(row=2, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
+        prog_frame.grid(row=2, column=0, columnspan=2, padx=16, pady=(4, 14), sticky="ew")
         prog_frame.grid_columnconfigure(0, weight=1)
 
         self.progress_bar = ctk.CTkProgressBar(prog_frame, height=6, fg_color=CARD2, progress_color=ACCENT)
@@ -357,7 +355,7 @@ class NGLApp(ctk.CTk):
 
         self.status_dot = ctk.CTkLabel(status, text="●", text_color=MUTED, font=("Segoe UI", 12))
         self.status_dot.grid(row=0, column=0, padx=(14, 4), pady=6)
-        self.status_lbl = ctk.CTkLabel(status, text="Ready (Direct HTTP • Smart Cloudflare Backoff)", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
+        self.status_lbl = ctk.CTkLabel(status, text="Ready (Direct HTTP • Safe Cloudflare Mode)", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
         self.status_lbl.grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
@@ -367,7 +365,7 @@ class NGLApp(ctk.CTk):
 
     def _labeled_slider(self, parent, label, from_, to, default, row, col, attr):
         frame = ctk.CTkFrame(parent, fg_color=CARD2, corner_radius=10)
-        frame.grid(row=row, column=col, padx=(12 if col == 0 else 6, 6 if col < 2 else 0), pady=8, sticky="ew")
+        frame.grid(row=row, column=col, padx=16, pady=8, sticky="ew")
         frame.grid_columnconfigure(0, weight=1)
 
         var = ctk.IntVar(value=default)
@@ -418,8 +416,8 @@ class NGLApp(ctk.CTk):
 
         unlimited  = self.unlimited_var.get()
         total      = -1 if unlimited else self.count_var.get()
-        threads_n  = self.threads_var.get()
-        delay_ms   = self.delay_var.get()
+        threads_n  = DEFAULT_THREADS
+        delay_ms   = DEFAULT_DELAY_MS
 
         self.total = total
         self.sent  = 0
@@ -431,7 +429,7 @@ class NGLApp(ctk.CTk):
         self.stop_btn.configure(state="normal")
         label_count = "∞" if unlimited else str(total)
         self._set_status("running", f"Sending {label_count} messages to @{username} via {threads_n} thread(s)...")
-        self._log("info", f"━━ Starting  ▸  @{username}  |  {label_count} msgs  |  {threads_n} thread(s) ━━")
+        self._log("info", f"━━ Starting  ▸  @{username}  |  {label_count} msgs  |  {threads_n} threads  |  {delay_ms}ms delay ━━")
 
         self.active_threads = threads_n
         for t in range(threads_n):
