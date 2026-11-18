@@ -237,10 +237,6 @@ class NGLApp(ctk.CTk):
             font=("Segoe UI", 22, "bold"), text_color=TEXT
         ).grid(row=0, column=1, pady=20)
 
-        ctk.CTkLabel(
-            header, text="v2.5  •  ultra-low CPU mode",
-            font=("Segoe UI", 11), text_color=MUTED
-        ).grid(row=0, column=2, padx=20, pady=20)
 
         # ── Controls Card ───────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(self, fg_color=CARD, corner_radius=16)
@@ -355,8 +351,8 @@ class NGLApp(ctk.CTk):
 
         self.status_dot = ctk.CTkLabel(status, text="●", text_color=MUTED, font=("Segoe UI", 12))
         self.status_dot.grid(row=0, column=0, padx=(14, 4), pady=6)
-        self.status_lbl = ctk.CTkLabel(status, text="Ready (Direct HTTP • Safe Cloudflare Mode)", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
-        self.status_lbl.grid(row=0, column=1, sticky="w")
+        # Status text removed per request
+        self.status_lbl = None
 
 
     def _labeled_slider(self, parent, label, from_, to, default, row, col, attr):
@@ -507,7 +503,8 @@ class NGLApp(ctk.CTk):
     def _set_status(self, kind, text):
         colors = {"running": ACCENT2, "success": SUCCESS, "error": ERROR, "warn": WARN, "idle": MUTED}
         self.status_dot.configure(text_color=colors.get(kind, MUTED))
-        self.status_lbl.configure(text=text)
+        if self.status_lbl:
+            self.status_lbl.configure(text=text)
 
 
 if __name__ == "__main__":
