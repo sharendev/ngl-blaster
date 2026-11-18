@@ -358,10 +358,6 @@ class NGLApp(ctk.CTk):
         self.status_lbl = ctk.CTkLabel(status, text="Ready (Direct HTTP • Safe Cloudflare Mode)", font=("Segoe UI", 11), text_color=MUTED, anchor="w")
         self.status_lbl.grid(row=0, column=1, sticky="w")
 
-        ctk.CTkLabel(
-            status, text="⚡ Powered by Ajith",
-            font=("Segoe UI", 11, "bold"), text_color=ACCENT2
-        ).grid(row=0, column=2, padx=(0, 16), sticky="e")
 
     def _labeled_slider(self, parent, label, from_, to, default, row, col, attr):
         frame = ctk.CTkFrame(parent, fg_color=CARD2, corner_radius=10)
