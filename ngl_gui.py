@@ -237,14 +237,13 @@ class NGLApp(ctk.CTk):
             font=("Segoe UI", 22, "bold"), text_color=TEXT
         ).grid(row=0, column=1, pady=20)
 
-
         # ── Controls Card ───────────────────────────────────────────────────
         ctrl = ctk.CTkFrame(self, fg_color=CARD, corner_radius=16)
         ctrl.grid(row=1, column=0, padx=20, pady=(16, 8), sticky="ew")
         ctrl.grid_columnconfigure(0, weight=3)
         ctrl.grid_columnconfigure(1, weight=1)
 
-        # URL
+        # URL Input Row
         url_frame = ctk.CTkFrame(ctrl, fg_color=CARD2, corner_radius=10)
         url_frame.grid(row=0, column=0, columnspan=2, padx=16, pady=(16, 8), sticky="ew")
         url_frame.grid_columnconfigure(1, weight=1)
@@ -257,8 +256,21 @@ class NGLApp(ctk.CTk):
         )
         self.url_entry.grid(row=0, column=1, sticky="ew", pady=10, padx=(0, 12))
 
-        # Messages Slider (takes full width of left area)
-        self.count_slider_frame = self._labeled_slider(ctrl, "Messages", 1, 1000, 100, row=1, col=0, attr="count_var")
+        # Messages Count Typing Box (Replaced Slider)
+        count_frame = ctk.CTkFrame(ctrl, fg_color=CARD2, corner_radius=10)
+        count_frame.grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        count_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(count_frame, text="💬  Messages Count:", font=("Segoe UI", 12, "bold"), text_color=MUTED).grid(row=0, column=0, padx=(14, 8), pady=10)
+        
+        self.count_entry = ctk.CTkEntry(
+            count_frame, placeholder_text="Enter number of messages (e.g. 500, 2000, 5000)",
+            font=("Segoe UI", 13), fg_color="transparent",
+            border_width=0, text_color=TEXT, height=40
+        )
+        self.count_entry.insert(0, "100")
+        self.count_entry.grid(row=0, column=1, sticky="ew", pady=10, padx=(0, 12))
+        self.count_frame = count_frame
 
         # Unlimited toggle
         unlimited_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -351,50 +363,15 @@ class NGLApp(ctk.CTk):
 
         self.status_dot = ctk.CTkLabel(status, text="●", text_color=MUTED, font=("Segoe UI", 12))
         self.status_dot.grid(row=0, column=0, padx=(14, 4), pady=6)
-        # Status text removed per request
         self.status_lbl = None
-
-
-    def _labeled_slider(self, parent, label, from_, to, default, row, col, attr):
-        frame = ctk.CTkFrame(parent, fg_color=CARD2, corner_radius=10)
-        frame.grid(row=row, column=col, padx=16, pady=8, sticky="ew")
-        frame.grid_columnconfigure(0, weight=1)
-
-        var = ctk.IntVar(value=default)
-        setattr(self, attr, var)
-
-        top = ctk.CTkFrame(frame, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
-        top.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(top, text=label, font=("Segoe UI", 11), text_color=MUTED).grid(row=0, column=0, sticky="w")
-        val_lbl = ctk.CTkLabel(top, text=str(default), font=("Segoe UI", 11, "bold"), text_color=TEXT)
-        val_lbl.grid(row=0, column=1, sticky="e")
-
-        def on_change(v):
-            val_lbl.configure(text=str(int(float(v))))
-
-        ctk.CTkSlider(
-            frame, from_=from_, to=to, variable=var,
-            fg_color=BG, progress_color=ACCENT, button_color=ACCENT2,
-            button_hover_color=ACCENT, command=on_change, height=16
-        ).grid(row=1, column=0, sticky="ew", padx=10, pady=(2, 10))
-        return frame
 
     # ── Actions ────────────────────────────────────────────────────────────────
     def _toggle_unlimited(self):
         self.unlimited_mode = self.unlimited_var.get()
-        state = "disabled" if self.unlimited_mode else "normal"
-        for child in self.count_slider_frame.winfo_children():
-            try:
-                child.configure(state=state)
-            except Exception:
-                pass
-            for sub in child.winfo_children():
-                try:
-                    sub.configure(state=state)
-                except Exception:
-                    pass
+        if self.unlimited_mode:
+            self.count_entry.configure(state="disabled")
+        else:
+            self.count_entry.configure(state="normal")
 
     def _start(self):
         global cooldown_until
@@ -406,10 +383,18 @@ class NGLApp(ctk.CTk):
             self._log("error", "⚠ Please enter an NGL URL or username first.")
             return
 
-        unlimited  = self.unlimited_var.get()
-        total      = -1 if unlimited else self.count_var.get()
-        threads_n  = DEFAULT_THREADS
-        delay_ms   = DEFAULT_DELAY_MS
+        unlimited = self.unlimited_var.get()
+        if unlimited:
+            total = -1
+        else:
+            raw_count = self.count_entry.get().strip()
+            if not raw_count.isdigit() or int(raw_count) <= 0:
+                self._log("error", "⚠ Please enter a valid positive number for messages count.")
+                return
+            total = int(raw_count)
+
+        threads_n = DEFAULT_THREADS
+        delay_ms  = DEFAULT_DELAY_MS
 
         self.total = total
         self.sent  = 0
