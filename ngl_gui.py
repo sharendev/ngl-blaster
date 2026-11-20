@@ -258,7 +258,7 @@ class NGLApp(ctk.CTk):
 
         # Messages Count Typing Box (Replaced Slider)
         count_frame = ctk.CTkFrame(ctrl, fg_color=CARD2, corner_radius=10)
-        count_frame.grid(row=1, column=0, padx=16, pady=8, sticky="ew")
+        count_frame.grid(row=1, column=0, padx=16, pady=(8, 4), sticky="ew")
         count_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(count_frame, text="💬  Messages Count:", font=("Segoe UI", 12, "bold"), text_color=MUTED).grid(row=0, column=0, padx=(14, 8), pady=10)
@@ -272,47 +272,47 @@ class NGLApp(ctk.CTk):
         self.count_entry.grid(row=0, column=1, sticky="ew", pady=10, padx=(0, 12))
         self.count_frame = count_frame
 
-        # Unlimited toggle
+        # Unlimited toggle (Row 2, completely visible)
         unlimited_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        unlimited_frame.grid(row=2, column=0, padx=16, pady=(0, 4), sticky="w")
+        unlimited_frame.grid(row=2, column=0, padx=18, pady=(4, 6), sticky="w")
         self.unlimited_var = ctk.BooleanVar(value=False)
-        ctk.CTkLabel(unlimited_frame, text="∞  Unlimited Mode", font=("Segoe UI", 12), text_color=MUTED).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(unlimited_frame, text="∞  Unlimited Mode", font=("Segoe UI", 12, "bold"), text_color=TEXT).pack(side="left", padx=(0, 10))
         self.unlimited_switch = ctk.CTkSwitch(
             unlimited_frame, text="", variable=self.unlimited_var,
             onvalue=True, offvalue=False,
             fg_color=CARD2, progress_color=WARN,
             button_color=ACCENT2, button_hover_color=ACCENT,
-            width=44, command=self._toggle_unlimited
+            width=46, command=self._toggle_unlimited
         )
         self.unlimited_switch.pack(side="left")
 
-        # Buttons (START / STOP) on the right
+        # Buttons (START / STOP) on the right (rowspan=2 to span rows 1 and 2)
         btn_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_frame.grid(row=1, column=1, padx=12, pady=12, sticky="nsew")
+        btn_frame.grid(row=1, column=1, rowspan=2, padx=12, pady=6, sticky="nsew")
         btn_frame.grid_rowconfigure((0, 1), weight=1)
 
         self.start_btn = ctk.CTkButton(
             btn_frame, text="▶  START",
             font=("Segoe UI", 13, "bold"),
             fg_color=ACCENT, hover_color="#6D28D9",
-            corner_radius=10, height=42,
+            corner_radius=10, height=38,
             command=self._start
         )
-        self.start_btn.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.start_btn.grid(row=0, column=0, sticky="ew", pady=(0, 3))
 
         self.stop_btn = ctk.CTkButton(
             btn_frame, text="■  STOP",
             font=("Segoe UI", 13, "bold"),
             fg_color="#1E1E35", hover_color="#2D1B69",
             border_width=1, border_color=ERROR,
-            text_color=ERROR, corner_radius=10, height=42,
+            text_color=ERROR, corner_radius=10, height=38,
             command=self._stop, state="disabled"
         )
-        self.stop_btn.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.stop_btn.grid(row=1, column=0, sticky="ew", pady=(3, 0))
 
-        # Progress bar
+        # Progress bar (Row 3, below unlimited switch)
         prog_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        prog_frame.grid(row=2, column=0, columnspan=2, padx=16, pady=(4, 14), sticky="ew")
+        prog_frame.grid(row=3, column=0, columnspan=2, padx=16, pady=(4, 14), sticky="ew")
         prog_frame.grid_columnconfigure(0, weight=1)
 
         self.progress_bar = ctk.CTkProgressBar(prog_frame, height=6, fg_color=CARD2, progress_color=ACCENT)
