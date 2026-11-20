@@ -1,13 +1,17 @@
 # NGL Blaster 🚀
 
-A fast, multithreaded desktop tool and CLI utility for sending automated anonymous messages to NGL.link targets.
+A fast, multithreaded desktop tool and CLI utility for sending automated anonymous messages to NGL.link targets with ultra-low CPU usage and smart rate-limit backoff.
+
+<p align="center">
+  <img src="assets/preview.png" alt="NGL Blaster GUI Preview" width="650" />
+</p>
 
 ## Features
 
 - **Modern Dark GUI**: CustomTkinter-based interface with macOS-styled controls, responsive dark theme, and real-time activity console.
-- **Live Metrics Dashboard**: Real-time tracking of sent messages, total duration, request times, and overall progress.
-- **Multithreading**: Configurable thread concurrency for high-efficiency throughput.
-- **Unlimited Mode**: Continuous message generation with randomized positive compliments and safety error handling.
+- **Ultra-Low CPU Usage**: Direct lightweight HTTP requests (~0–1% CPU) instead of heavy Chromium instances.
+- **Custom Count & Unlimited Mode**: Type any number of messages or toggle continuous sending mode.
+- **Smart Cloudflare Cooldown**: Automated synchronized backoff and retry handling across all worker threads.
 - **CLI Mode**: Standalone command-line script (`ngl_bot.py`) for headless/server environments.
 
 ---
@@ -16,8 +20,8 @@ A fast, multithreaded desktop tool and CLI utility for sending automated anonymo
 
 1. **Clone the repository**:
    ```bash
-   git clone <YOUR_REPOSITORY_URL>
-   cd <REPOSITORY_FOLDER>
+   git clone https://github.com/sharendev/ngl-blaster.git
+   cd ngl-blaster
    ```
 
 2. **Set up virtual environment (optional but recommended)**:
@@ -29,7 +33,6 @@ A fast, multithreaded desktop tool and CLI utility for sending automated anonymo
 3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
-   playwright install chromium
    ```
 
 ---
@@ -37,26 +40,25 @@ A fast, multithreaded desktop tool and CLI utility for sending automated anonymo
 ## Usage
 
 ### 1. GUI Application
-Launch the GUI application:
+Launch the desktop application:
 ```bash
 python3 ngl_gui.py
 ```
-- Enter your target link: `https://ngl.link/[USERNAME]`
-- Adjust the number of messages, threads, and inter-request delay (ms).
-- Toggle **∞ UNLIMITED** mode if you wish to run continuously.
-- Click **▶ START** to begin or **⏹ STOP** to interrupt anytime.
+- Enter your target link: `https://ngl.link/[USERNAME]` (or just `[USERNAME]`).
+- Enter the number of messages to send, or toggle **∞ Unlimited Mode**.
+- Click **▶ START** to begin or **■ STOP** to pause anytime.
 
 ### 2. Command-Line Interface (CLI)
-Run directly via the terminal:
+Run directly from terminal:
 
-- Send a specific number of messages (e.g. 50 messages across 5 threads):
+- Send a specific number of messages:
   ```bash
-  python3 ngl_bot.py --url https://ngl.link/TARGET_USER --messages 50 --threads 5 --delay 100
+  python3 ngl_bot.py --url https://ngl.link/TARGET_USER --count 100
   ```
 
 - Send unlimited messages continuously:
   ```bash
-  python3 ngl_bot.py --url https://ngl.link/TARGET_USER --unlimited --threads 5 --delay 100
+  python3 ngl_bot.py --url https://ngl.link/TARGET_USER --unlimited
   ```
 
 ---
